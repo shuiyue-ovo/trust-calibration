@@ -57,16 +57,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 构建数据
+    // 构建数据（submitted_at 用数据库 NOW() 处理，避免格式兼容问题）
     const sessionId = `s_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const submittedAt = new Date().toISOString().replace("T", " ").replace("Z", "+00");
     const rows = body.results.map((r) => ({
       session_id: sessionId,
       scenario_id: r.scenarioId,
       risk_answer: r.riskAnswer,
       complexity_answer: r.complexityAnswer,
-      time_spent_ms: r.timeSpentMs,
-      total_time_ms: body.totalTimeMs,
-      submitted_at: body.submittedAt,
+      time_spent_ms: Math.round(r.timeSpentMs),
+      total_time_ms: Math.round(body.totalTimeMs),
+      submitted_at: submittedAt,
     }));
 
     // 写入 Supabase

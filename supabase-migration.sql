@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS classification_results (
   complexity_answer TEXT NOT NULL,       -- 被试判断：高/低
   time_spent_ms INTEGER NOT NULL,        -- 该题耗时（毫秒）
   total_time_ms INTEGER NOT NULL,        -- 整场测试总耗时（毫秒）
-  submitted_at  TIMESTAMPTZ NOT NULL,    -- 提交时间
+  submitted_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),    -- 提交时间
   created_at    TIMESTAMPTZ DEFAULT NOW()
 );
 
