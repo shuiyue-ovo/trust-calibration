@@ -76,11 +76,12 @@ export async function POST(request: NextRequest) {
       .insert(rows);
 
     if (insertError) {
-      console.error("[保存] Supabase 写入失败:", insertError);
+      console.error("[保存] Supabase 写入失败:", JSON.stringify(insertError));
       return NextResponse.json(
         {
-          error: `数据库写入失败: ${insertError.message}`,
-          code: insertError.code,
+          error: `数据库写入失败 [${insertError.code}]: ${insertError.message}`,
+          details: insertError.details || "",
+          hint: insertError.hint || "",
         },
         { status: 500 }
       );
