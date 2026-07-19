@@ -1,9 +1,8 @@
 // ============================================================
-// 保存实验结果 API → Supabase 数据库
+// 保存实验结果 API → Supabase（原生 fetch，绕过 supabase-js）
 // ============================================================
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 
 interface ClassificationResult {
   scenarioId: number;
@@ -29,76 +28,62 @@ export async function POST(request: NextRequest) {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-    // 检查环境变量是否正确配置
     if (!supabaseUrl || !supabaseServiceKey) {
-      console.error("[保存] 缺少环境变量:", {
-        hasUrl: !!supabaseUrl,
-        hasServiceKey: !!supabaseServiceKey,
-      });
       return NextResponse.json(
-        {
-          error: "服务器配置缺失：环境变量未设置",
-          detail: {
-            hasUrl: !!supabaseUrl,
-            hasServiceKey: !!supabaseServiceKey,
-          },
-        },
+        { error: `环境变量缺失: URL=${!!supabaseUrl}, Key=${!!supabaseServiceKey}` },
         { status: 500 }
       );
     }
 
-    if (
-      supabaseUrl.includes("your-project-id") ||
-      supabaseServiceKey.includes("your-service-role-key")
-    ) {
-      return NextResponse.json(
-        { error: "服务器配置缺失：Supabase 密钥为占位值，请替换为真实密钥后重新部署" },
-        { status: 500 }
-      );
-    }
-
-    // 构建数据 — submitted_at 不传，由数据库 DEFAULT NOW() 自动填充
     const sessionId = `s_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    const rows = body.results.map((r) => ({
-      session_id: sessionId,
-      scenario_id: r.scenarioId,
-      risk_answer: r.riskAnswer,
-      complexity_answer: r.complexityAnswer,
-      time_spent_ms: Math.round(r.timeSpentMs),
-      total_time_ms: Math.round(body.totalTimeMs),
-    }));
 
-    // 写入 Supabase
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    const { error: insertError } = await supabase
-      .from("classification_results")
-      .insert(rows);
+    // 逐条插入（避免数组格式兼容问题）
+    const errors: string[] = [];
+    for (const r of body.results) {
+      const row = {
+        session_id: sessionId,
+        scenario_id: Number(r.scenarioId),
+        risk_answer: String(r.riskAnswer),
+        complexity_answer: String(r.complexityAnswer),
+        time_spent_ms: Number(Math.round(r.timeSpentMs)),
+        total_time_ms: Number(Math.round(body.totalTimeMs)),
+      };
 
-    if (insertError) {
-      console.error("[保存] Supabase 写入失败:", JSON.stringify(insertError));
-      return NextResponse.json(
+      const res = await fetch(
+        `${supabaseUrl}/rest/v1/classification_results`,
         {
-          error: `数据库写入失败 [${insertError.code}]: ${insertError.message}`,
-          details: insertError.details || "",
-          hint: insertError.hint || "",
-        },
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${supabaseServiceKey}`,
+            apikey: supabaseServiceKey,
+            Prefer: "return=minimal",
+          },
+          body: JSON.stringify(row),
+        }
+      );
+
+      if (!res.ok) {
+        const errText = await res.text();
+        errors.push(`场景${r.scenarioId}: ${res.status} ${errText}`);
+      }
+    }
+
+    if (errors.length > 0) {
+      return NextResponse.json(
+        { error: errors.join(" | ") },
         { status: 500 }
       );
     }
-
-    console.log(`[保存] 成功: session=${sessionId}, rows=${rows.length}`);
 
     return NextResponse.json({
       success: true,
       sessionId,
-      rowCount: rows.length,
+      count: body.results.length,
     });
   } catch (error) {
-    console.error("[保存] 未知错误:", error);
     return NextResponse.json(
-      {
-        error: error instanceof Error ? error.message : "服务器内部错误",
-      },
+      { error: error instanceof Error ? error.message : "服务器错误" },
       { status: 500 }
     );
   }
