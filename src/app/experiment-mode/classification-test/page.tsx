@@ -236,8 +236,10 @@ export default function ClassificationTestPage() {
       }
 
       setPhase("submitted");
-    } catch {
-      setSubmitError("保存失败，请重试");
+    } catch (err) {
+      setSubmitError(
+        err instanceof Error ? err.message : "保存失败，请重试"
+      );
     } finally {
       setIsSubmitting(false);
     }
