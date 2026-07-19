@@ -1,13 +1,9 @@
 // ============================================================
 // 保存实验结果 API → Supabase 数据库
-// 服务端使用 Service Role Key（不暴露给前端）
-// 同时也保存一份到本地文件作为备份
 // ============================================================
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import fs from "fs";
-import path from "path";
 
 interface ClassificationResult {
   scenarioId: number;
@@ -33,8 +29,36 @@ export async function POST(request: NextRequest) {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-    // 构建提交数据
-    const sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    // 检查环境变量是否正确配置
+    if (!supabaseUrl || !supabaseServiceKey) {
+      console.error("[保存] 缺少环境变量:", {
+        hasUrl: !!supabaseUrl,
+        hasServiceKey: !!supabaseServiceKey,
+      });
+      return NextResponse.json(
+        {
+          error: "服务器配置缺失：环境变量未设置",
+          detail: {
+            hasUrl: !!supabaseUrl,
+            hasServiceKey: !!supabaseServiceKey,
+          },
+        },
+        { status: 500 }
+      );
+    }
+
+    if (
+      supabaseUrl.includes("your-project-id") ||
+      supabaseServiceKey.includes("your-service-role-key")
+    ) {
+      return NextResponse.json(
+        { error: "服务器配置缺失：Supabase 密钥为占位值，请替换为真实密钥后重新部署" },
+        { status: 500 }
+      );
+    }
+
+    // 构建数据
+    const sessionId = `s_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const rows = body.results.map((r) => ({
       session_id: sessionId,
       scenario_id: r.scenarioId,
@@ -45,74 +69,36 @@ export async function POST(request: NextRequest) {
       submitted_at: body.submittedAt,
     }));
 
-    let savedToSupabase = false;
+    // 写入 Supabase
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const { error: insertError } = await supabase
+      .from("classification_results")
+      .insert(rows);
 
-    // 尝试写入 Supabase
-    if (
-      supabaseUrl &&
-      supabaseServiceKey &&
-      supabaseUrl !== "https://your-project-id.supabase.co" &&
-      supabaseServiceKey !== "your-service-role-key"
-    ) {
-      try {
-        const supabase = createClient(supabaseUrl, supabaseServiceKey);
-        const { error } = await supabase.from("classification_results").insert(rows);
-
-        if (error) {
-          console.error("[Supabase] 写入失败:", error.message);
-        } else {
-          savedToSupabase = true;
-          console.log(`[Supabase] 已保存 ${rows.length} 条结果, session: ${sessionId}`);
-        }
-      } catch (err) {
-        console.error("[Supabase] 连接失败:", err);
-      }
+    if (insertError) {
+      console.error("[保存] Supabase 写入失败:", insertError);
+      return NextResponse.json(
+        {
+          error: `数据库写入失败: ${insertError.message}`,
+          code: insertError.code,
+        },
+        { status: 500 }
+      );
     }
 
-    // 本地文件备份（始终保存，部署到 Vercel 后会失败但不影响 Supabase）
-    try {
-      const dataDir = path.join(process.cwd(), "..", "实验数据");
-      if (!fs.existsSync(dataDir)) {
-        fs.mkdirSync(dataDir, { recursive: true });
-      }
-      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-      const filePath = path.join(dataDir, `分类测试_${timestamp}.json`);
-      const output = {
-        sessionId,
-        submittedAt: body.submittedAt,
-        totalTimeSec: Math.round(body.totalTimeMs / 1000),
-        results: body.results.map((r) => ({
-          scenarioId: r.scenarioId,
-          riskAnswer: r.riskAnswer,
-          complexityAnswer: r.complexityAnswer,
-          timeSpentSec: (r.timeSpentMs / 1000).toFixed(1),
-        })),
-        savedToSupabase,
-      };
-      fs.writeFileSync(filePath, JSON.stringify(output, null, 2), "utf-8");
-      console.log(`[文件] 备份已保存: ${filePath}`);
-    } catch {
-      // 文件写入失败静默忽略（Vercel 上会失败）
-    }
-
-    if (!savedToSupabase && (!supabaseUrl || supabaseUrl.includes("your-project-id"))) {
-      return NextResponse.json({
-        success: true,
-        savedToSupabase: false,
-        message:
-          "已本地保存。如需云端同步，请先配置 Supabase（见 README）",
-      });
-    }
+    console.log(`[保存] 成功: session=${sessionId}, rows=${rows.length}`);
 
     return NextResponse.json({
       success: true,
-      savedToSupabase,
       sessionId,
+      rowCount: rows.length,
     });
   } catch (error) {
-    console.error("[保存] 失败:", error);
+    console.error("[保存] 未知错误:", error);
     return NextResponse.json(
-      { error: "保存失败，请重试" },
+      {
+        error: error instanceof Error ? error.message : "服务器内部错误",
+      },
       { status: 500 }
     );
   }

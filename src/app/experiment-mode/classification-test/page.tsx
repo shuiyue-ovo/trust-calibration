@@ -231,7 +231,8 @@ export default function ClassificationTestPage() {
       });
 
       if (!response.ok) {
-        throw new Error("保存失败");
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `服务器错误 (${response.status})`);
       }
 
       setPhase("submitted");
